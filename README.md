@@ -17,7 +17,7 @@ The original Danbooru Dataset Filter is great for quickly filtering millions of 
 ## Key features
 
 - **Fast local search** over Danbooru Parquet metadata with Polars lazy queries.
-- **Unified Danbooru-style query box** supporting tags, negation, `OR`, wildcards, metadata filters, source filters, Pixiv filters, and order modifiers.
+- **Unified Danbooru-style query box** supporting tags, negation, `OR`, wildcards, metadata filters, and order modifiers.
 - **Rating, date, score, favorites, orientation, and MD5 dedup filters** from the GUI.
 - **Two search modes**:
   - Fast in-process search for normal usage.
@@ -34,7 +34,7 @@ The original Danbooru Dataset Filter is great for quickly filtering millions of 
 | Area | Upstream project | This extended version |
 |---|---|---|
 | Core purpose | Fast GUI metadata filtering and URL export | Same core filtering workflow, plus analysis and research tooling |
-| Query input | Include/exclude style filtering | Unified Danbooru-style query box with `OR`, negation, wildcards, `source:`, `pixiv:`, numeric ranges, and `order:` syntax |
+| Query input | Include/exclude style filtering | Unified Danbooru-style query box with `OR`, negation, wildcards, ` numeric ranges, and `order:` syntax |
 | Data loading | Main local Parquet database | Combines local clean metadata and optional API-synced metadata when available |
 | Memory behavior | Fast local Polars search | Adds a memory-safe isolated search mode for very large queries |
 | Extensions | Not the main focus | Built-in extension API using `setup(app)` / `register(app)`, extension buttons, `get_current_df()`, and `data_updated` |
@@ -50,8 +50,8 @@ The original Danbooru Dataset Filter is great for quickly filtering millions of 
 ```text
 1girl score:>50 rating:g,s order:score
 hatsune_miku OR megurine_luka -lowres favcount:>=25
-*miku* source:*pixiv* order:favcount
-pixiv:any width:>=1024 height:>=1024 rating:e
+*miku* order:favcount
+width:>=1024 height:>=1024 rating:e
 score:100..500 date order:random
 ```
 
@@ -63,8 +63,6 @@ Supported query concepts include:
 - Wildcards: `*miku*`
 - Numeric metadata: `score:>50`, `favcount:10..200`, `width:>=1024`, `height:<2048`, `id:123456`
 - Ratings: `rating:g`, `rating:s`, `rating:q`, `rating:e`, or comma groups like `rating:g,s`
-- Source matching: `source:none`, `source:http`, `source:*pixiv*`
-- Pixiv matching: `pixiv:any`, `pixiv:123456`, `pixiv:1000..9999`
 - Sorting from the query: `order:score`, `order:favcount`, `order:date`, `order:id`, `order:random`
 
 ---
