@@ -114,6 +114,21 @@ Explore tag relationships inside the current search result:
 
 ## Installation
 
+### Option A: Download from Releases
+
+You can download the required data files from the repository's **Releases** page.
+
+Two release ZIPs are available:
+
+- `statbooru.zip` — ready-to-use package with the `.exe`, extensions, and data included.
+- `data.zip` — data-only package for users who want to run Statbooru from their own Python environment.
+
+If you use `statbooru.zip`, extract it and run the executable.
+
+If you use `data.zip`, extract it and place the included `data/` folder next to `main.py`.
+
+
+### Option B:
 ### 1. Clone the repository
 
 ```bash
@@ -152,6 +167,9 @@ pip freeze > requirements.txt
 ### 4. Add the metadata files
 
 Create a `data/` folder next to `main.py`:
+
+The required metadata files can be downloaded from the repository's **Releases** page.  
+Download `data.zip` if you only need the metadata files for a self-made Python environment.
 
 ```text
 project-root/
@@ -255,7 +273,8 @@ Useful host methods/signals:
 - Thumbnail preview requires network access to the Danbooru CDN.
 - Very large searches can temporarily use significant RAM. Use **Memory-safe isolated** mode when working with huge result sets.
 - The app assumes Danbooru-style metadata columns such as `id`, `rating`, `score`, `fav_count`, `file_url`, `created_at`, `md5`, and tag category columns.
-
+- Required metadata files are distributed through GitHub Releases as `data.zip`.
+- The ready-to-use release package is distributed as `statbooru.zip` and includes the executable plus data.
 ---
 
 ## Credits
