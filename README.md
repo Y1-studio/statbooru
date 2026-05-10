@@ -1,4 +1,4 @@
-# Danbooru Dataset Finder Extended
+# Statbooru
 
 A high-speed desktop tool for searching, filtering, analyzing, and exporting Danbooru metadata for AI training dataset curation.
 
