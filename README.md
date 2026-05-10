@@ -167,7 +167,6 @@ project-root/
 
 The base upstream project points users to the Danbooru 2026 clean metadata files on Hugging Face. This extended app expects the same style of local Parquet metadata and tag dictionary files.
 
-Do **not** commit large `.parquet` files to GitHub. Keep them in `data/` locally and add them to `.gitignore`.
 
 ### 5. Install extensions
 
@@ -191,23 +190,6 @@ python main.py
 
 ---
 
-## Recommended `.gitignore`
-
-```gitignore
-.venv/
-__pycache__/
-*.pyc
-.DS_Store
-
-# Local Danbooru metadata/cache files
-data/*.parquet
-data/*.csv
-data/*.txt
-
-# Exported datasets
-exports/
-*.log
-```
 
 ---
 
