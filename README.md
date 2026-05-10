@@ -132,8 +132,8 @@ If you use `data.zip`, extract it and place the included `data/` folder next to 
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
-cd YOUR_REPO_NAME
+git clone https://github.com/Y1-studio/statbooru.git
+cd statbooru
 ```
 
 ### 2. Create a virtual environment
