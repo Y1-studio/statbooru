@@ -12,7 +12,6 @@ import queue as queue_module
 import traceback
 
 # RAM saver: Polars uses worker threads; fewer threads usually means lower peak native RAM.
-# Raise this if you prefer speed over memory, e.g. "4" or "8".
 os.environ.setdefault("POLARS_MAX_THREADS", "8")
 
 import polars as pl
@@ -28,6 +27,23 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QDate, QThread, pyqtSignal, QUrl, QRunnable, QThreadPool, pyqtSlot, QObject
 from PyQt6.QtGui import QColor, QDesktopServices, QPixmap
+
+# ==========================================
+# GLOBAL EXTENSION WINDOW FLAGS PATCH
+# ==========================================
+# This automatically grants minimize and maximize/fullscreen controls to all 
+# extension dialogs globally, excluding native alerts/popups.
+_orig_dialog_init = QDialog.__init__
+def _patched_dialog_init(self, *args, **kwargs):
+    _orig_dialog_init(self, *args, **kwargs)
+    class_name = self.__class__.__name__
+    if class_name not in ("QMessageBox", "QFileDialog", "QInputDialog", "QColorDialog", "QFontDialog"):
+        self.setWindowFlags(
+            self.windowFlags() | 
+            Qt.WindowType.WindowMinimizeButtonHint | 
+            Qt.WindowType.WindowMaximizeButtonHint
+        )
+QDialog.__init__ = _patched_dialog_init
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -306,12 +322,6 @@ class QueryParser:
         return exprs
 
 def apply_basic_filters(df_or_lf, filters: dict):
-    """Apply non-sorting filters to either a Polars DataFrame or LazyFrame.
-
-    Keeping these filters lazy before collect prevents the app from loading
-    the whole parquet result into RAM before date/rating/orientation/score
-    filters are applied.
-    """
     if df_or_lf is None:
         return df_or_lf
 
@@ -376,15 +386,6 @@ def apply_all_filters_and_sort(df: pl.DataFrame, filters: dict) -> pl.DataFrame:
 class ExtensionManager:
     @staticmethod
     def load_extensions(app):
-        """Load every Python extension from EXT_DIR.
-
-        Supported extension entrypoints:
-          - setup(app)      # original API
-          - register(app)   # compatibility alias used by some plugins
-
-        Failures are stored on app.extension_errors so one bad extension does not
-        prevent the rest of the app or other extensions from loading.
-        """
         if not hasattr(app, "loaded_extensions"):
             app.loaded_extensions = []
         if not hasattr(app, "extension_errors"):
@@ -457,7 +458,6 @@ class ThumbnailWidget(QLabel):
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setText("⌛")
         self.setStyleSheet("background-color: transparent;")
-        # Pass clicks through to the table underneath!
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
         worker = ThumbWorker(url)
@@ -800,7 +800,6 @@ class TagBrowser(QTextBrowser):
 # PROCESS-ISOLATED SEARCH HELPERS
 # ==========================================
 def _child_emit(q, kind, payload):
-    """Small queue messages only. Never send a Polars DataFrame through this."""
     try:
         q.put((kind, payload))
     except Exception:
@@ -808,7 +807,6 @@ def _child_emit(q, kind, payload):
 
 
 def _build_filtered_lazy_pipeline(filters, progress_queue=None):
-    """Build the filtered/sorted local parquet LazyFrame without collecting it."""
     lf = load_combined_lazyframe()
 
     if progress_queue is not None:
@@ -839,13 +837,6 @@ def _build_filtered_lazy_pipeline(filters, progress_queue=None):
 
 
 def _search_to_parquet_child(filters, output_path, progress_queue):
-    """
-    Run the heavy Polars query in a short-lived child process.
-
-    This fixes the Windows/Rust/Arrow allocator problem: any giant temporary
-    MEM_PRIVATE heap regions created during collect/sort/dedup die with this
-    child process instead of staying in the PyQt GUI process.
-    """
     try:
         _child_emit(progress_queue, "progress", "Child process started for isolated search" + format_memory_suffix())
         lf = _build_filtered_lazy_pipeline(filters, progress_queue)
@@ -991,7 +982,6 @@ class SearchWorker(QThread):
                         exit_code = proc.exitcode
                         if exit_code not in (0, None):
                             raise RuntimeError(f"Search child process exited with code {exit_code}")
-                        # The child may have exited just before the done message was received.
                         continue
 
             if proc is not None:
@@ -1011,7 +1001,6 @@ class SearchWorker(QThread):
             trim_process_working_set()
             self.finished.emit(result_df)
 
-            # Break local references as soon as Qt has queued the signal delivery.
             result_df = None
             done_payload = None
             gc.collect()
@@ -1161,7 +1150,7 @@ class DanbooruApp(QMainWindow):
 
         self.cb_thumbs = QCheckBox("Load Thumbnails in Results (Requires Network)")
         self.cb_thumbs.setChecked(False)
-        self.cb_thumbs.toggled.connect(self.update_ui) # Refresh if toggled
+        self.cb_thumbs.toggled.connect(self.update_ui)
         props_layout.addWidget(self.cb_thumbs)
 
         props_group.setLayout(props_layout)
@@ -1218,11 +1207,11 @@ class DanbooruApp(QMainWindow):
 
         self.table = QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels(["Thumb", "ID", "Rating", "Score", "Favs", "Tags (Preview)"])
-        self.table.setColumnWidth(0, 115) # Thumb
-        self.table.setColumnWidth(1, 80)  # ID
-        self.table.setColumnWidth(2, 60)  # Rating
-        self.table.setColumnWidth(3, 60)  # Score
-        self.table.setColumnWidth(4, 60)  # Favs
+        self.table.setColumnWidth(0, 115)
+        self.table.setColumnWidth(1, 80)
+        self.table.setColumnWidth(2, 60)
+        self.table.setColumnWidth(3, 60)
+        self.table.setColumnWidth(4, 60)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
@@ -1254,53 +1243,32 @@ class DanbooruApp(QMainWindow):
         self.ext_button_layout.addWidget(button)
 
     def get_current_df(self):
-        """Return the full filtered result currently held in RAM.
-
-        This is intentionally NOT just the visible table preview. Extensions can
-        use this directly when they need a Polars DataFrame without forcing a
-        second parquet/API query.
-        """
         return self.current_df
 
     def get_results_df(self):
-        """Compatibility alias for extensions that call get_results_df()."""
         return self.get_current_df()
 
     def get_current_lazy_df(self):
-        """Return the full in-RAM result as a LazyFrame for extension code."""
         if self.current_df is not None:
             return self.current_df.lazy()
         return None
 
     def get_unlimited_lazy_df(self):
-        """Compatibility hook used by analytics/extensions.
-
-        Older extension builds expected this method so they could bypass the UI
-        Max Results / 500-row preview path. In this build, current_df already
-        contains the full filtered result in RAM, so this returns a LazyFrame
-        view of that same data instead of recalculating the search.
-        """
-        # Return a LazyFrame view on demand instead of storing one persistently.
-        # This keeps extension compatibility without adding another app-owned
-        # long-lived reference to the current/old DataFrame.
         return self.get_current_lazy_df()
 
     def get_full_lazy_df(self):
-        """Compatibility alias for get_unlimited_lazy_df()."""
         return self.get_unlimited_lazy_df()
 
     def get_current_query(self):
         return self.search_input.toPlainText().strip()
 
     def get_search_query(self):
-        """Compatibility alias for extensions that inspect the search text."""
         return self.get_current_query()
 
     def set_search_query(self, text: str):
         self.search_input.setPlainText(str(text or ""))
 
     def get_last_filters(self):
-        """Return a copy of the last search filter dictionary, if available."""
         return dict(self.last_filters or {})
 
     def get_base_dir(self):
@@ -1319,15 +1287,12 @@ class DanbooruApp(QMainWindow):
         self.update_ui()
 
     def add_extension_widget(self, widget):
-        """Allow extensions to add any QWidget, not only QPushButton."""
         self.ext_button_layout.addWidget(widget)
 
     def add_extension_control(self, widget):
-        """Compatibility alias for add_extension_widget()."""
         self.add_extension_widget(widget)
 
     def register_extension_button(self, button: QPushButton):
-        """Compatibility alias for add_extension_button()."""
         self.add_extension_button(button)
 
     def append_tag_to_search(self, tag):
@@ -1404,7 +1369,6 @@ class DanbooruApp(QMainWindow):
         self.lbl_stats.setText(msg)
 
     def clear_results_ui(self):
-        """Clear table items/widgets so repeated searches do not keep Qt objects alive."""
         self.table.setUpdatesEnabled(False)
         for row in range(self.table.rowCount()):
             for col in range(self.table.columnCount()):
@@ -1418,7 +1382,6 @@ class DanbooruApp(QMainWindow):
         gc.collect()
 
     def cleanup_worker(self, *args):
-        """Release the finished SearchWorker object after each search."""
         worker = self.sender()
         if worker is not None:
             worker.deleteLater()
@@ -1427,11 +1390,6 @@ class DanbooruApp(QMainWindow):
         gc.collect()
 
     def release_old_results(self):
-        """Drop app-owned references to previous result data before a new search.
-
-        This cannot clear references held by third-party extensions, but it
-        prevents the main app from keeping old Polars DataFrames/LazyFrames.
-        """
         self.current_df = None
         self.unlimited_lazy_df = None
         self.clear_results_ui()
@@ -1526,21 +1484,13 @@ class DanbooruApp(QMainWindow):
             self.on_process_error(str(e))
 
     def on_process_success(self, result_df):
-        # Store the complete filtered result in RAM once. The visible table only
-        # previews rows from this DataFrame; extensions should reuse this object
-        # via get_current_df() or get_unlimited_lazy_df().
         self.current_df = result_df
-        # Do not store result_df.lazy() persistently. Creating it on demand avoids
-        # an extra long-lived wrapper that can keep old native buffers alive.
         self.unlimited_lazy_df = None
         trim_process_working_set()
         self.update_ui()
         self.btn_search.setEnabled(True)
         self.btn_search.setText("Search")
         gc.collect()
-
-        # Tag dictionary API syncing was moved into the Dataset Updater extension.
-        # Use Dataset Updater > Tag Dictionary API to rebuild tags_dictionary_API.parquet.
 
     def on_process_error(self, error_msg):
         self.lbl_stats.setText(f"Error: {error_msg}")
@@ -1582,7 +1532,6 @@ class DanbooruApp(QMainWindow):
 
         for i, row in enumerate(preview_df.iter_rows(named=True)):
 
-            # 1. Fetch & Show Thumbnail (If Enabled)
             if show_thumbs:
                 self.table.setItem(i, 0, QTableWidgetItem(""))
 
@@ -1602,13 +1551,11 @@ class DanbooruApp(QMainWindow):
                     thumb_widget = ThumbnailWidget(thumb_url)
                     self.table.setCellWidget(i, 0, thumb_widget)
 
-            # 2. Text Data
             self.table.setItem(i, 1, QTableWidgetItem(str(row.get("id", ""))))
             self.table.setItem(i, 2, QTableWidgetItem(str(row.get("rating", ""))))
             self.table.setItem(i, 3, QTableWidgetItem(str(row.get("score", "0"))))
             self.table.setItem(i, 4, QTableWidgetItem(str(row.get("fav_count", "0"))))
 
-            # 3. Colored Tags
             html = " ".join(filter(None, [
                 self.wrap_tag(row.get("tag_string_artist"), "#f38ba8"),
                 self.wrap_tag(row.get("tag_string_copyright"), "#cba6f7"),
@@ -1622,11 +1569,9 @@ class DanbooruApp(QMainWindow):
             tb.tag_single_clicked.connect(self.append_tag_to_search)
             self.table.setCellWidget(i, 5, tb)
 
-            # Dynamic Row Heights based on thumbnail setting
             self.table.setRowHeight(i, 115 if show_thumbs else 60)
 
         self.btn_export.setEnabled(len(self.current_df) > 0)
-        # Emit the full in-RAM result so extensions receive all matches, not only the preview rows.
         self.data_updated.emit(self.current_df)
 
     def wrap_tag(self, tags_str, color):
