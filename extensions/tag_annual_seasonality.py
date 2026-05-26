@@ -6,6 +6,8 @@ Install:
         extensions/tag_annual_seasonality.py
 
 Features:
+    - Autocomplete Search Box: Real-time search and filtering of seasonal tags,
+      matching the design and behavior of the main application.
     - Manual Apply Button: Filters only run when you click "Apply Filters" -
       change as many controls as you want, no work happens until you commit.
     - Pending-changes indicator: the Apply button highlights yellow with a dot
@@ -22,6 +24,8 @@ Features:
 import os
 import math
 import json
+import re
+import fnmatch
 import webbrowser
 from urllib.parse import quote
 from collections import Counter, deque, defaultdict
@@ -43,7 +47,8 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSpinBox,
     QCheckBox, QTableWidget, QTableWidgetItem, QHeaderView,
     QMessageBox, QApplication, QGroupBox, QSplitter,
-    QDoubleSpinBox, QGridLayout, QWidget, QRadioButton, QButtonGroup
+    QDoubleSpinBox, QGridLayout, QWidget, QRadioButton, QButtonGroup,
+    QLineEdit, QListWidget, QListWidgetItem
 )
 
 # --- CONSTANTS & HELPERS ---
@@ -97,8 +102,147 @@ def generate_ym_range(min_ym, max_ym):
         if m > 12: m, y = 1, y + 1
     return res
 
+def format_count(c):
+    if c >= 1_000_000: return f"{c/1_000_000:.1f}M"
+    if c >= 1_000: return f"{c/1_000:.1f}k"
+    return str(c)
 
-# --- DB-SCAN WORKER THREAD (ONLY EXTRACTS RAW DATA, NO FILTERING) ---
+
+# --- AUTOCOMPLETE LINE EDIT ---
+
+class ExtAutocompletePopup(QListWidget):
+    def __init__(self, parent):
+        super().__init__()
+        self.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setStyleSheet("""
+            QListWidget { border: 2px solid #89b4fa; background: #313244; border-radius: 6px; }
+            QListWidget::item { padding: 2px; border-radius: 4px; }
+            QListWidget::item:selected { background-color: #45475a; }
+        """)
+
+class ExtTagAutocompleteLineEdit(QLineEdit):
+    def __init__(self, tag_data):
+        super().__init__()
+        self.tag_data = tag_data
+        self.popup = ExtAutocompletePopup(self)
+        self.popup.itemClicked.connect(self.insert_completion)
+        self.textChanged.connect(self.on_text_changed)
+        self.setStyleSheet("background-color: #313244; border: 1px solid #45475a; border-radius: 6px; padding: 6px; color: #cdd6f4;")
+
+    def keyPressEvent(self, event):
+        if self.popup.isVisible():
+            if event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up):
+                current_row = self.popup.currentRow()
+                next_row = min(current_row + 1, self.popup.count() - 1) if event.key() == Qt.Key.Key_Down else max(current_row - 1, 0)
+                self.popup.setCurrentRow(next_row)
+                return
+            elif event.key() in (Qt.Key.Key_Enter, Qt.Key.Key_Return):
+                if item := self.popup.currentItem():
+                    self.insert_completion(item)
+                return
+            elif event.key() == Qt.Key.Key_Escape:
+                self.popup.hide()
+                return
+        super().keyPressEvent(event)
+
+    def on_text_changed(self):
+        text = self.text()
+        cursor_pos = self.cursorPosition()
+        text_before = text[:cursor_pos]
+        parts = re.split(r'\s+', text_before)
+        current_word = parts[-1]
+
+        prefix = ""
+        if current_word.startswith("-") or current_word.startswith("~"):
+            prefix = current_word[0]
+            current_word = current_word[1:]
+
+        if len(current_word) < 2 or not self.tag_data:
+            self.popup.hide()
+            return
+
+        current_word = current_word.lower()
+        word_boundary_match = "_" + current_word
+        matches = []
+
+        for search_key, display_text, actual_tag, color, count in self.tag_data:
+            if search_key.startswith(current_word) or word_boundary_match in search_key:
+                matches.append((search_key, display_text, actual_tag, color, count))
+
+        if not matches:
+            self.popup.hide()
+            return
+
+        matches.sort(key=lambda x: -x[4])
+        matches = matches[:20]
+        self.popup.clear()
+
+        for search_key, display_text, actual_tag, color, count in matches:
+            item = QListWidgetItem()
+            widget = QWidget()
+            widget.setMinimumHeight(24)
+            layout = QHBoxLayout(widget)
+            layout.setContentsMargins(4, 0, 4, 0)
+
+            highlight_color = "#89b4fa"
+            formatted_tag_html = f'<span style="color: {color}; font-weight: bold; font-size: 13px;">'
+            idx = display_text.find(current_word)
+            if idx == -1:
+                idx = display_text.find(word_boundary_match)
+                if idx != -1: idx += 1
+
+            if idx != -1:
+                formatted_tag_html += display_text[:idx]
+                formatted_tag_html += f'<span style="color: {highlight_color};">{display_text[idx : idx + len(current_word)]}</span>'
+                formatted_tag_html += display_text[idx + len(current_word):]
+            else:
+                formatted_tag_html += display_text
+
+            formatted_tag_html += '</span>'
+
+            lbl_tag = QLabel()
+            lbl_tag.setText(formatted_tag_html)
+            lbl_count = QLabel(format_count(count))
+            lbl_count.setStyleSheet("color: #a6adc8; font-size: 12px;")
+
+            layout.addWidget(lbl_tag)
+            layout.addStretch()
+            layout.addWidget(lbl_count)
+
+            item.setSizeHint(widget.sizeHint())
+            item.setData(Qt.ItemDataRole.UserRole, prefix + actual_tag)
+            self.popup.addItem(item)
+            self.popup.setItemWidget(item, widget)
+
+        self.popup.setCurrentRow(0)
+        rect = self.cursorRect()
+        p = self.mapToGlobal(rect.bottomLeft())
+        self.popup.setGeometry(p.x(), p.y() + 4, 350, 200)
+        self.popup.show()
+
+    def insert_completion(self, item):
+        if not item: return
+        selected_tag = item.data(Qt.ItemDataRole.UserRole)
+        text = self.text()
+        cursor_pos = self.cursorPosition()
+
+        text_before = text[:cursor_pos]
+        text_after = text[cursor_pos:]
+
+        parts = re.split(r'(\s+)', text_before)
+        parts[-1] = selected_tag + " "
+        new_text_before = "".join(parts)
+
+        self.blockSignals(True)
+        self.setText(new_text_before + text_after)
+        self.setCursorPosition(len(new_text_before))
+        self.blockSignals(False)
+        self.popup.hide()
+
+
+# --- DB-SCAN WORKER THREAD ---
 
 def _pass1_batch(pyd, cols, valid_indices):
     c = Counter()
@@ -156,7 +300,6 @@ def _pass2_batch(pyd, sel_cols_info, valid_tags, valid_indices):
 
 class AnnualSeasonalityWorker(QThread):
     progress = pyqtSignal(str)
-    # tag_doy_counts, tag_ym_counts, global_ym_counts, cat_vote
     finished_ok = pyqtSignal(dict, dict, dict, dict)
     failed = pyqtSignal(str)
 
@@ -164,12 +307,6 @@ class AnnualSeasonalityWorker(QThread):
         super().__init__()
         self.base_dir = base_dir
         self.settings = settings
-
-    def run(self):
-        try: self._run()
-        except Exception as e:
-            import traceback; traceback.print_exc()
-            self.failed.emit(str(e))
 
     def _db_paths(self):
         return [p for name in ("danbooru2026_clean.parquet", "danbooru_api_clean.parquet")
@@ -190,6 +327,12 @@ class AnnualSeasonalityWorker(QThread):
             else: valid.append(i)
         return valid
 
+    def run(self):
+        try: self._run()
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            self.failed.emit(str(e))
+
     def _run(self):
         if pa is None or ds is None: return self.failed.emit("Missing pyarrow")
         paths = self._db_paths()
@@ -209,7 +352,6 @@ class AnnualSeasonalityWorker(QThread):
         workers, batch_size, min_posts = self.settings["num_workers"], self.settings["batch_size"], self.settings["min_posts"]
         seen_keys = set()
 
-        # --- PASS 1 ---
         self.progress.emit(f"Pass 1: Identifying tags with ≥{min_posts:,} posts...")
         scanner1 = dataset.scanner(columns=dedup_cols + cols_to_scan, batch_size=batch_size, use_threads=True)
         global_counts = Counter()
@@ -229,7 +371,6 @@ class AnnualSeasonalityWorker(QThread):
         valid_tags = {t for t, c in global_counts.items() if c >= min_posts}
         if not valid_tags: return self.failed.emit(f"No tags met the {min_posts} threshold.")
 
-        # --- PASS 2 ---
         self.progress.emit(f"Pass 2: Extracting dates for {len(valid_tags):,} candidate tags...")
         seen_keys.clear()
 
@@ -266,15 +407,9 @@ class AnnualSeasonalityWorker(QThread):
 
 
 # --- FILTER WORKER ---
-# Why this exists: the old code ran the scoring/filter loop directly on the
-# UI thread inside apply_live_filters(). With many tags (the default 1000
-# post threshold can keep tens of thousands of tags after a scan) that loop
-# could take 1-5+ seconds. Every spinbox tick triggered it, the window
-# stopped repainting, and Qt's title bar showed "Not Responding". By moving
-# the loop here, the GUI stays responsive while filtering runs.
 
 class FilterWorker(QThread):
-    done = pyqtSignal(list, list)   # results, global_heat
+    done = pyqtSignal(list, list)
 
     def __init__(self, tag_doy_counts, tag_ym_counts, cat_vote, params):
         super().__init__()
@@ -289,14 +424,28 @@ class FilterWorker(QThread):
         max_peak_share  = self.p["max_peak_share"]
         min_recurrence  = self.p["min_recurrence"]
         sel_types       = self.p["sel_types"]
+        search_query    = self.p["search_query"]
 
         results = []
         global_heat = [0.0] * 366
+        search_tokens = search_query.split() if search_query else []
 
         for t, doy_arr in self.tag_doy_counts.items():
             cat, color = self.cat_vote.get(t, ("unknown", DEFAULT_COLOR))
 
-            # 1. Category Filter
+            # Query filtering
+            if search_tokens:
+                matched_all = True
+                for tok in search_tokens:
+                    is_neg = tok.startswith('-')
+                    clean_tok = tok[1:] if is_neg else tok
+                    match = fnmatch.fnmatchcase(t, clean_tok)
+                    if (is_neg and match) or (not is_neg and not match):
+                        matched_all = False
+                        break
+                if not matched_all:
+                    continue
+
             if cat not in sel_types:
                 continue
 
@@ -304,7 +453,6 @@ class FilterWorker(QThread):
             if total == 0:
                 continue
 
-            # Sliding window best fit (circular via doubled array)
             doubled = doy_arr + doy_arr
             w_sum = max_sum = sum(doubled[0:w])
             best_doy = 0
@@ -317,11 +465,9 @@ class FilterWorker(QThread):
             bg_avg = (total - max_sum) / (366 - w) if (366 - w) > 0 else 0
             score = (peak_avg + 1e-5) / (bg_avg + 1e-5)
 
-            # 2. Score Filter
             if score < min_score:
                 continue
 
-            # Fad/Recurrence Filtering (uses peak month(s))
             start_mm, _ = doy_to_mmdd(best_doy)
             end_mm,   _ = doy_to_mmdd((best_doy + w - 1) % 366)
             months_to_check = {start_mm, end_mm}
@@ -340,19 +486,15 @@ class FilterWorker(QThread):
             max_year_peak = max(peak_months_per_year.values())
             my_share = max_year_peak / total_peak_months
 
-            # 3. Fad Filter
             if my_share > max_peak_share:
                 continue
 
-            # Years spiked: year must contribute >= 10% of biggest year in this month
             threshold = max_year_peak * 0.10
             years_spiked = sum(1 for v in peak_months_per_year.values() if v >= threshold)
 
-            # 4. Recurrence Filter
             if years_spiked < min_recurrence:
                 continue
 
-            # Passed all filters
             mm, dd = doy_to_mmdd(best_doy + w // 2)
             for offset in range(w):
                 global_heat[(best_doy + offset) % 366] += 1
@@ -417,18 +559,16 @@ class AnnualSeasonalityDialog(QDialog):
     def __init__(self, app):
         super().__init__(app)
         self.app = app
-        self.worker = None          # DB-scan worker
-        self.filter_worker = None   # background filter/scoring worker
-        self.filters_dirty = False  # True when filter controls changed but not applied
+        self.worker = None
+        self.filter_worker = None
+        self.filters_dirty = False
         self.cache_file = os.path.join(self._base_dir(), "data", "seasonality_cache.json")
 
-        # Raw Data (From Scan/Cache)
         self.tag_doy_counts = {}
         self.tag_ym_counts = {}
         self.global_ym_counts = {}
         self.cat_vote = {}
 
-        # Actively Filtered Output Data
         self.active_results = []
         self.active_global_heat = []
 
@@ -462,9 +602,7 @@ class AnnualSeasonalityDialog(QDialog):
         scan_layout.addWidget(self.btn_load); scan_layout.addWidget(self.btn_save); scan_layout.addWidget(self.btn_analyze)
         cfg_layout.addLayout(scan_layout, 0, 0, 1, 6)
 
-        # Row 1: Filter controls + Apply button.
-        # Filters no longer auto-run; they call mark_dirty(), and the real
-        # work only fires on btn_apply click (via apply_filters()).
+        # Row 1: Filter controls + Apply button
         live_layout = QHBoxLayout()
         live_layout.addWidget(QLabel("<b>[Filters]</b> Tag Types:"))
 
@@ -499,11 +637,19 @@ class AnnualSeasonalityDialog(QDialog):
         self.btn_apply = QPushButton("✓ Apply Filters")
         self.btn_apply.clicked.connect(self.apply_filters)
         self.btn_apply.setStyleSheet(APPLY_READY_STYLE)
-        self.btn_apply.setToolTip("Run the filter/scoring loop with the current control values.\nThe button highlights yellow when settings have changed since the last apply.")
         live_layout.addWidget(self.btn_apply)
 
         live_layout.addStretch()
         cfg_layout.addLayout(live_layout, 1, 0, 1, 6)
+
+        # Row 2: Tag Filter Box with Autocomplete (using standard QLineEdit, no resize handle)
+        search_filter_layout = QHBoxLayout()
+        search_filter_layout.addWidget(QLabel("<b>Tag Search Filter:</b>"))
+        self.txt_tag_search = ExtTagAutocompleteLineEdit(getattr(self.app, "tag_data", []))
+        self.txt_tag_search.setPlaceholderText("Filter seasonal results by tag name (supports *wildcards* and -negations)...")
+        self.txt_tag_search.textChanged.connect(self.mark_dirty)
+        search_filter_layout.addWidget(self.txt_tag_search)
+        cfg_layout.addLayout(search_filter_layout, 2, 0, 1, 6)
 
         layout.addWidget(cfg)
 
@@ -537,8 +683,6 @@ class AnnualSeasonalityDialog(QDialog):
 
         self.chk_normalize = QCheckBox("Normalize (%)")
         self.chk_normalize.setStyleSheet("color: #cdd6f4;")
-        # Graph mode / normalize only redraw the currently selected tag - they
-        # do NOT change the filter set - so they're allowed to be live.
         self.chk_normalize.toggled.connect(self.on_table_selection)
 
         self.btn_group = QButtonGroup()
@@ -587,7 +731,6 @@ class AnnualSeasonalityDialog(QDialog):
 
     def _base_dir(self): return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-    # --- SAVE / LOAD DATA ---
     def save_cache(self):
         if not self.tag_doy_counts: return QMessageBox.warning(self, "No Data", "Run a scan first.")
         try:
@@ -617,16 +760,13 @@ class AnnualSeasonalityDialog(QDialog):
                 return
 
             self.lbl_status.setText("Cache loaded. Running first filter pass...")
-            self.apply_filters()   # auto-run once after data load so user sees something
+            self.apply_filters()
         except Exception as e: QMessageBox.critical(self, "Load Error", f"Failed to load cache:\n{str(e)}")
 
-    # --- ANALYSIS FLOW ---
     def start(self):
         if self.worker is not None and self.worker.isRunning(): return
 
-        # When rescanning, we scan ALL categories so they can be filtered later.
         sel_types = [k for k, cb in self.chks.items()]
-
         settings = {
             "selected_types": sel_types, "min_posts": self.spin_min_posts.value(),
             "batch_size": self.spin_batch.value(), "num_workers": self.spin_workers.value()
@@ -645,33 +785,28 @@ class AnnualSeasonalityDialog(QDialog):
         self.cat_vote = cat_vote
         self.lbl_status.setText("Database extraction complete. Running first filter pass...")
         self.btn_analyze.setEnabled(True); self.btn_analyze.setText("🚀 Run Database Scan"); self.worker = None
-        self.apply_filters()   # auto-run once after scan completes
+        self.apply_filters()
 
     def on_error(self, err):
         self.lbl_status.setText(f"Error: {err}"); QMessageBox.critical(self, "Scan Failed", err)
         self.btn_analyze.setEnabled(True); self.btn_analyze.setText("🚀 Run Database Scan"); self.worker = None
 
-    # --- FILTER FLOW: MARK DIRTY -> APPLY -> WORKER -> UPDATE UI ---
-
     def mark_dirty(self):
-        """Called when any filter control changes. Highlights the Apply button
-        but does NOT start the filter loop (that only happens on click)."""
         if not self.tag_doy_counts:
-            return  # no data loaded yet, nothing to filter
+            return
         if self.filters_dirty:
-            return  # already marked, avoid redundant stylesheet thrash
+            return
         self.filters_dirty = True
         self.btn_apply.setText("✓ Apply Filters  ●")
         self.btn_apply.setStyleSheet(APPLY_DIRTY_STYLE)
         self.lbl_status.setText("Filter changes pending - click '✓ Apply Filters' to refresh.")
 
     def apply_filters(self):
-        """Manual trigger: runs the filter/scoring loop in a background thread."""
         if not self.tag_doy_counts:
             QMessageBox.warning(self, "No Data", "Load a cache or run a database scan first.")
             return
         if self.filter_worker is not None and self.filter_worker.isRunning():
-            return  # already running, ignore duplicate clicks
+            return
 
         params = {
             "w":              self.spin_window.value(),
@@ -679,6 +814,7 @@ class AnnualSeasonalityDialog(QDialog):
             "max_peak_share": self.spin_max_year.value() / 100.0,
             "min_recurrence": self.spin_recurrence.value(),
             "sel_types":      set(k for k, cb in self.chks.items() if cb.isChecked()),
+            "search_query":   self.txt_tag_search.text().strip()
         }
 
         self.btn_apply.setEnabled(False)
@@ -701,7 +837,6 @@ class AnnualSeasonalityDialog(QDialog):
         self.filter_worker = None
         self.reset_view()
 
-    # --- UI UPDATES ---
     def populate_table(self, results):
         self.table.blockSignals(True); self.table.clearSelection(); self.table.setSortingEnabled(False); self.table.setRowCount(len(results))
         for i, r in enumerate(results):
@@ -812,7 +947,6 @@ class AnnualSeasonalityDialog(QDialog):
             else:
                 self.ax.clear(); self.ax.set_title(f"No Timeline Data for {tag} (Update Cache)", color="#cdd6f4"); self.canvas.draw()
 
-    # --- HELPER ACTIONS ---
     def selected_tag(self):
         return item.data(Qt.ItemDataRole.UserRole) if (sel := self.table.selectedItems()) and (item := self.table.item(sel[0].row(), 0)) else None
     def add_selected_include(self):
@@ -835,6 +969,8 @@ class AnnualSeasonalityPlugin:
         self.btn.clicked.connect(self.show_dialog); app.add_extension_button(self.btn)
     def show_dialog(self):
         if self.dialog is None: self.dialog = AnnualSeasonalityDialog(self.app)
+        if hasattr(self.app, "tag_data"):
+            self.dialog.txt_tag_search.tag_data = self.app.tag_data
         self.dialog.show(); self.dialog.raise_(); self.dialog.activateWindow()
 
 def setup(app):
