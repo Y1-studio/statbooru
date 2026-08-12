@@ -1,0 +1,14 @@
+{
+  "name": "Ocean Glass",
+  "bg": "#0b1820",
+  "surface": "#132a35",
+  "surface_alt": "#10232c",
+  "border": "#285163",
+  "border_hover": "#367088",
+  "text": "#d9f2f4",
+  "muted": "#8fb3ba",
+  "accent": "#42c6c8",
+  "accent_hover": "#78dcda",
+  "accent_text": "#07191c",
+  "success": "#87d69b"
+}

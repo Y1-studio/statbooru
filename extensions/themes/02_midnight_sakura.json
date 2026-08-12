@@ -1,0 +1,14 @@
+{
+  "name": "Midnight Sakura",
+  "bg": "#17131f",
+  "surface": "#282033",
+  "surface_alt": "#211a2b",
+  "border": "#594564",
+  "border_hover": "#755b83",
+  "text": "#f4e9f5",
+  "muted": "#bba9c2",
+  "accent": "#e879a9",
+  "accent_hover": "#f29bc0",
+  "accent_text": "#24121c",
+  "success": "#91d7b4"
+}

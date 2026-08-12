@@ -1,0 +1,19 @@
+{
+  "name": "Windows 3.1",
+  "bg": "#008080",
+  "surface": "#c0c0c0",
+  "surface_alt": "#ffffff",
+  "border": "#000000",
+  "border_hover": "#000080",
+  "text": "#000000",
+  "muted": "#606060",
+  "accent": "#000080",
+  "accent_hover": "#0000aa",
+  "accent_text": "#ffffff",
+  "success": "#008000",
+  "win31": true,
+  "color_map": true,
+  "color_map_options": true,
+  "color_map_kind": "win31",
+  "dither_thumbnails": true
+}

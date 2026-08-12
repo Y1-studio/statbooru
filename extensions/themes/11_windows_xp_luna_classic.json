@@ -1,0 +1,17 @@
+{
+  "name": "Windows XP Luna Classic",
+  "bg": "#3a6ea5",
+  "surface": "#ece9d8",
+  "surface_alt": "#f7f6ef",
+  "border": "#7f9db9",
+  "border_hover": "#316ac5",
+  "text": "#000000",
+  "muted": "#5f6f7f",
+  "accent": "#245edb",
+  "accent_hover": "#3d78e8",
+  "accent_text": "#ffffff",
+  "success": "#3c8d0d",
+  "xp_classic": true,
+  "color_map_options": true,
+  "color_map_kind": "xp"
+}

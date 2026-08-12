@@ -1,0 +1,14 @@
+{
+  "name": "Warm Paper",
+  "bg": "#f4efe6",
+  "surface": "#fffaf2",
+  "surface_alt": "#ece3d5",
+  "border": "#c7b8a3",
+  "border_hover": "#a99378",
+  "text": "#352f2a",
+  "muted": "#766b61",
+  "accent": "#b85c38",
+  "accent_hover": "#ce7651",
+  "accent_text": "#fffaf2",
+  "success": "#4f7d58"
+}

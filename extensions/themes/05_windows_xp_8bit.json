@@ -1,0 +1,18 @@
+{
+  "name": "Windows XP 8-Bit",
+  "bg": "#d6dff7",
+  "surface": "#ece9d8",
+  "surface_alt": "#d9e4f7",
+  "border": "#245edb",
+  "border_hover": "#ff8c00",
+  "text": "#0a246a",
+  "muted": "#5f6f8f",
+  "accent": "#316ac5",
+  "accent_hover": "#4f86d9",
+  "accent_text": "#ffffff",
+  "success": "#3c8d0d",
+  "retro": true,
+  "checkerboard": true,
+  "color_map_options": true,
+  "color_map_kind": "xp"
+}

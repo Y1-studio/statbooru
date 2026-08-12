@@ -1,0 +1,15 @@
+{
+  "name": "Windows 7 Aero",
+  "bg": "#78b7e5",
+  "surface": "#e9f4fb",
+  "surface_alt": "#dcecf7",
+  "border": "#5b8eae",
+  "border_hover": "#2b72a8",
+  "text": "#16354a",
+  "muted": "#557184",
+  "accent": "#4b9bd3",
+  "accent_hover": "#77bce8",
+  "accent_text": "#ffffff",
+  "success": "#6aa84f",
+  "aero": true
+}
